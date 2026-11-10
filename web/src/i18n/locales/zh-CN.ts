@@ -343,6 +343,8 @@ export default {
         shortcuts: "快捷键",
         lightTheme: "切换到浅色主题",
         darkTheme: "切换到深色主题",
+        siteBalance: "{{name}} 的账户余额，点击打开账户后台",
+        siteSyncFailed: "同步账户模型失败：{{message}}",
     },
     home: {
         promptError: "获取提示词失败",

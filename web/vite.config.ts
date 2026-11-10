@@ -8,6 +8,7 @@ import { parseChangelog } from "./src/lib/release";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
 const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
+const base = process.env.VITE_BASE || "/";
 const localChangelog = readFileSync(resolve(webDir, "../CHANGELOG.md"), "utf8");
 
 // Expose /plugins/index.json with local plugin files from public/plugins.
@@ -19,7 +20,7 @@ function localPluginsManifest(): Plugin {
             return readdirSync(pluginsDir)
                 .filter((file) => file.endsWith(".js"))
                 .sort()
-                .map((file) => `/plugins/${file}`);
+                .map((file) => `${base}plugins/${file}`);
         } catch {
             return [];
         }
@@ -27,7 +28,7 @@ function localPluginsManifest(): Plugin {
     return {
         name: "local-plugins-manifest",
         configureServer(server) {
-            server.middlewares.use("/plugins/index.json", (_req, res) => {
+            server.middlewares.use(`${base}plugins/index.json`, (_req, res) => {
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify(listLocalPlugins()));
             });
@@ -39,7 +40,7 @@ function localPluginsManifest(): Plugin {
 }
 
 export default defineConfig({
-    base: process.env.VITE_BASE || "/",
+    base,
     plugins: [react(), localPluginsManifest()],
     resolve: {
         alias: {
