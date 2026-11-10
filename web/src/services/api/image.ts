@@ -1,7 +1,9 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { SITE_ASYNC_IMAGES } from "@/constant/runtime-config";
+import { isSiteChannel } from "@/lib/site-channels";
+import { buildApiUrl, resolveModelChannel, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -107,6 +109,7 @@ const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
 // 与 image-storage 的下载超时保持一致，避免接口挂起时节点一直停在生成中。
 const IMAGE_REQUEST_TIMEOUT_MS = 10 * 60_000;
+const IMAGE_TASK_POLL_INTERVAL_MS = 3000;
 
 const GEMINI_SUPPORTED_RATIOS = ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
 
@@ -691,6 +694,29 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
+type ImageTaskResponse = { task_id?: string; status?: string; result?: ImageApiResponse; error?: { message?: string } };
+
+/**
+ * 提交 OpenAI 兼容的图片请求。sub2api 站点渠道开启异步图片任务时，改为提交任务后轮询结果，
+ * 避免长耗时请求被网关或 CDN 中途断开；轮询间隔取 sub2api 建议的 3 秒，总时长沿用同步请求的超时。
+ */
+async function postImageRequest(config: AiConfig, requestConfig: AiConfig, path: string, body: FormData | Record<string, unknown>, options?: RequestOptions): Promise<ImageApiResponse> {
+    const request = { headers: aiHeaders(requestConfig, body instanceof FormData ? undefined : "application/json"), signal: options?.signal, timeout: IMAGE_REQUEST_TIMEOUT_MS };
+    if (!SITE_ASYNC_IMAGES || !isSiteChannel(resolveModelChannel(config, config.model || config.imageModel).id)) {
+        return (await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, path), body, request)).data;
+    }
+    const task = (await axios.post<ImageTaskResponse>(aiApiUrl(requestConfig, `${path}/async`), body, request)).data;
+    if (!task.task_id) throw new Error(apiText("noImageReturned"));
+    const deadline = Date.now() + IMAGE_REQUEST_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, IMAGE_TASK_POLL_INTERVAL_MS));
+        const state = (await axios.get<ImageTaskResponse>(aiApiUrl(requestConfig, `/images/tasks/${task.task_id}`), { headers: aiHeaders(requestConfig), signal: options?.signal })).data;
+        if (state.status === "completed" && state.result) return state.result;
+        if (state.status === "failed") throw new Error(state.error?.message || apiText("requestFailed"));
+    }
+    throw new Error(apiText("imageTimeout"));
+}
+
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
@@ -725,8 +751,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestSize = resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
+        const response = await postImageRequest(
+            config,
+            requestConfig,
+            "/images/generations",
             {
                 model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, prompt),
@@ -738,13 +766,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
                 output_format: IMAGE_OUTPUT_FORMAT,
             },
-            {
-                headers: aiHeaders(requestConfig, "application/json"),
-                signal: options?.signal,
-                timeout: IMAGE_REQUEST_TIMEOUT_MS,
-            },
+            options,
         );
-        const images = await parseImagePayload(response.data);
+        const images = await parseImagePayload(response);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
@@ -810,8 +834,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     files.forEach((file) => formData.append(imageField, file));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal, timeout: IMAGE_REQUEST_TIMEOUT_MS });
-        const images = await parseImagePayload(response.data);
+        const response = await postImageRequest(config, requestConfig, "/images/edits", formData, options);
+        const images = await parseImagePayload(response);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));

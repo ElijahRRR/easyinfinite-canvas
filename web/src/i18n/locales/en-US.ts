@@ -343,6 +343,8 @@ export default {
         shortcuts: "Keyboard shortcuts",
         lightTheme: "Switch to light theme",
         darkTheme: "Switch to dark theme",
+        siteBalance: "Account balance of {{name}}. Click to open the account console",
+        siteSyncFailed: "Failed to sync account models: {{message}}",
     },
     home: {
         promptError: "Failed to load prompts",

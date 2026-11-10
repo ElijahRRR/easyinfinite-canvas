@@ -13,10 +13,15 @@ sanitize_id() {
 
 GA4_ID=$(sanitize_id "${ANALYTICS_GA4_ID:-}")
 BAIDU_ID=$(sanitize_id "${ANALYTICS_BAIDU_ID:-}")
+# sub2api 站点接入开关，只接受 true，其余值一律视为关闭。
+SUB2API=$([ "${SUB2API_ENABLED:-}" = "true" ] && echo true || echo "")
+SUB2API_ASYNC=$([ "${SUB2API_ASYNC_IMAGES:-}" = "true" ] && echo true || echo "")
 
 cat > /usr/share/nginx/html/config.js <<EOF
 window.__RUNTIME_CONFIG__ = {
   ANALYTICS_GA4_ID: "${GA4_ID}",
-  ANALYTICS_BAIDU_ID: "${BAIDU_ID}"
+  ANALYTICS_BAIDU_ID: "${BAIDU_ID}",
+  SUB2API_ENABLED: "${SUB2API}",
+  SUB2API_ASYNC_IMAGES: "${SUB2API_ASYNC}"
 };
 EOF

@@ -32,4 +32,5 @@ export const router = createBrowserRouter([
         ],
     },
     { path: "*", element: <NotFound /> },
-]);
+    // 部署在子路径（VITE_BASE）时让路由以该路径为根。
+], { basename: import.meta.env.BASE_URL.replace(/\/$/, "") || "/" });

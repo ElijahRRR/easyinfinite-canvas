@@ -1,0 +1,48 @@
+---
+title: 接入 sub2api
+description: 与 sub2api 同域部署，让 sub2api 用户打开画布即可使用自己的额度和模型
+---
+
+# 接入 sub2api
+
+开启站点接入后，已登录 [sub2api](https://github.com/Wei-Shaw/sub2api) 的用户打开画布时不需要创建或填写 API Key：画布会读取 sub2api 的登录状态，为用户可用的每个分组自动取得或创建一个名为 `Infinite Canvas` 的专用 Key，同步该分组的模型并生成站点渠道。生成请求由浏览器用这个 Key 直连 sub2api 网关，额度、分组权限和限额都按 sub2api 的规则执行。sub2api 本身不需要改代码。
+
+## 前提
+
+画布必须和 sub2api 部署在**同一个域名（同源）**下，例如 sub2api 在 `https://example.com/`，画布在 `https://example.com/canvas/`。画布依赖同源才能读到 sub2api 保存在浏览器里的登录状态，独立域名或子域名下不生效。
+
+## 部署
+
+1. 以子路径构建镜像并启用站点接入：
+
+```bash
+docker build --build-arg VITE_BASE=/canvas/ -t infinite-canvas-site .
+docker run -d --name infinite-canvas -p 127.0.0.1:3000:3000 \
+  -e SUB2API_ENABLED=true \
+  infinite-canvas-site
+```
+
+2. 在 sub2api 前面的反向代理里把 `/canvas/` 转给画布，其余请求仍交给 sub2api（以 nginx 为例）：
+
+```nginx
+location /canvas/ {
+    proxy_pass http://127.0.0.1:3000/;
+}
+```
+
+3. 在 sub2api 后台系统设置的自定义菜单里新增一项，地址填 `https://example.com/canvas/`。用户点击菜单即可进入画布；直接访问画布地址也可以。
+
+## 行为说明
+
+- 未登录时打开画布会跳到 sub2api 登录页；如果配置了上面的自定义菜单，登录后会回到内嵌画布的页面。
+- 在 sub2api 退出登录或切换账号后，画布会移除旧账号的站点渠道和 Key，并同步新账号。
+- 每次打开画布都会重新同步分组和模型；用户自己添加的渠道和模型调用脚本会保留。
+- 顶部导航显示当前账户余额，点击打开 sub2api 后台。
+- 专用 Key 保存在用户浏览器本地，用户可以在 sub2api 的 API 密钥页停用或删除它；被停用的 Key 不会被自动替换。
+- 模型的图片、视频分类优先取 sub2api 模型广场的计费类型，模型广场未开启时按模型名猜测，可在渠道设置里手动调整。
+
+## 异步图片任务（可选）
+
+图片生成耗时较长时，同步请求可能被网关或 CDN 中途断开。sub2api 已开启异步图片任务（需要对象存储）时，可以加上 `-e SUB2API_ASYNC_IMAGES=true`，站点渠道的图片请求会改为提交任务后每 3 秒查询一次结果，最长等待 10 分钟。
+
+启用前请确认对象存储的桶允许来自站点域名的跨域（CORS）读取，否则任务完成后浏览器下载不到图片。异步图片任务只支持 OpenAI 和 Grok 平台的分组。

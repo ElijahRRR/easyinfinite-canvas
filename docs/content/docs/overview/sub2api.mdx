@@ -1,0 +1,48 @@
+---
+title: sub2api Integration
+description: Deploy on the same origin as sub2api so its users can use their own quota and models without entering an API key
+---
+
+# sub2api Integration
+
+With site integration enabled, a user signed in to [sub2api](https://github.com/Wei-Shaw/sub2api) can open the canvas without creating or entering an API key. The canvas reads the sub2api session, gets or creates a dedicated key named `Infinite Canvas` for each group the user can use, syncs that group's models, and builds site providers from them. Generation requests go from the browser straight to the sub2api gateway with that key, so quota, group permissions, and limits follow sub2api's rules. sub2api itself needs no code changes.
+
+## Requirement
+
+The canvas must be served from the **same origin** as sub2api, for example sub2api at `https://example.com/` and the canvas at `https://example.com/canvas/`. The canvas relies on the shared origin to read the session that sub2api keeps in the browser; a separate domain or subdomain does not work.
+
+## Deployment
+
+1. Build the image for a sub-path and enable site integration:
+
+```bash
+docker build --build-arg VITE_BASE=/canvas/ -t infinite-canvas-site .
+docker run -d --name infinite-canvas -p 127.0.0.1:3000:3000 \
+  -e SUB2API_ENABLED=true \
+  infinite-canvas-site
+```
+
+2. In the reverse proxy in front of sub2api, route `/canvas/` to the canvas and leave everything else to sub2api (nginx example):
+
+```nginx
+location /canvas/ {
+    proxy_pass http://127.0.0.1:3000/;
+}
+```
+
+3. In the sub2api admin console, add a custom menu item pointing to `https://example.com/canvas/`. Users can enter the canvas from that menu or open its URL directly.
+
+## Behavior
+
+- Opening the canvas while signed out redirects to the sub2api login page; with the custom menu item configured, login returns to the page that embeds the canvas.
+- After signing out of sub2api or switching accounts, the canvas removes the previous account's site providers and keys and syncs the new account.
+- Groups and models are synced each time the canvas opens; providers and call scripts added by the user are kept.
+- The top navigation shows the account balance and links to the sub2api console.
+- The dedicated key is stored in the user's browser. Users can disable or delete it on the sub2api API keys page; a disabled key is not replaced automatically.
+- Image and video models are classified by the billing mode from the sub2api model plaza when it is enabled, otherwise by model name; this can be adjusted in provider settings.
+
+## Asynchronous image tasks (optional)
+
+Long-running synchronous image requests can be cut off by a gateway or CDN. When sub2api has asynchronous image tasks enabled (object storage required), add `-e SUB2API_ASYNC_IMAGES=true`: image requests on site providers then submit a task and poll for the result every 3 seconds, for up to 10 minutes.
+
+Before enabling it, make sure the storage bucket allows cross-origin (CORS) reads from the site's domain, otherwise the browser cannot download finished images. Asynchronous image tasks only support groups on the OpenAI and Grok platforms.

@@ -6,6 +6,7 @@
 - [功能介绍](/zh-CN/docs/overview/features)
 - [Render 部署](/zh-CN/docs/overview/render)
 - [Docker 部署](/zh-CN/docs/overview/docker)
+- [接入 sub2api](/zh-CN/docs/overview/sub2api)
 - [第三方提示词来源](/zh-CN/docs/overview/third-party-prompt-repositories)
 
 ## 操作手册

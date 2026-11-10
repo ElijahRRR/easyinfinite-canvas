@@ -3,7 +3,9 @@ import { useEffect, useRef } from "react";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
 
+import { SITE_ENABLED } from "@/constant/runtime-config";
 import { useConfigStore } from "@/stores/use-config-store";
+import { redirectToSiteLogin, useSiteStore } from "@/stores/use-site-store";
 import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -13,7 +15,34 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const importChannelCredentials = useConfigStore((state) => state.importChannelCredentials);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
 
+    const siteStatus = useSiteStore((state) => state.status);
+    const siteError = useSiteStore((state) => state.error);
+
     usePromptSourceScheduler();
+
+    useEffect(() => {
+        if (!SITE_ENABLED) return;
+        const { sync, refreshUser } = useSiteStore.getState();
+        void sync();
+        // sub2api 页面登录、退出或切换账号时重新同步；回到画布页面时刷新余额。
+        const onStorage = (event: StorageEvent) => {
+            if (event.key === "auth_token") void sync();
+        };
+        const onVisible = () => {
+            if (document.visibilityState === "visible") void refreshUser();
+        };
+        window.addEventListener("storage", onStorage);
+        document.addEventListener("visibilitychange", onVisible);
+        return () => {
+            window.removeEventListener("storage", onStorage);
+            document.removeEventListener("visibilitychange", onVisible);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (siteStatus === "anonymous") void redirectToSiteLogin();
+        if (siteStatus === "error") message.error(t("topNav.siteSyncFailed", { message: siteError }));
+    }, [message, siteError, siteStatus, t]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;
